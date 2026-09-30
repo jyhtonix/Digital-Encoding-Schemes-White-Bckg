@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Line Encoding Visualiser — NRZ-L / NRZI / Manchester / Diff Manchester / Bipolar-AMI</title>
+  <style>
+    :root{
+      --bg:#ffffff;        /* changed from #0f1724 to white */
+      --card:#ffffff;      /* changed from dark to white */
+      --accent:#38bdf8;
+      --muted:#333333;     /* darker text color for white background */
+      --panel:#f5f5f5;     /* light gray for panels */
+    }
+    html,body{
+      height:100%;
+      margin:0;
+      font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,'Helvetica Neue',Arial;
+    }
+    body{
+      background:linear-gradient(180deg,#ffffff 0%, #f0f4f8 100%);
+      color:#111827;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+    }
+    .wrap{
+      width:100%;
+      max-width:1100px;
+      background:#ffffff;
+      border-radius:12px;
+      padding:18px;
+      box-shadow:0 10px 30px rgba(0,0,0,0.1);
+    }
+    h1{margin:0 0 12px;font-size:18px;color:#111827;}
+    .controls{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+    .panel{
+      background:var(--panel);
+      padding:10px;
+      border-radius:8px;
+      display:flex;
+      gap:8px;
+      align-items:center;
+    }
+    label{font-size:13px;color:var(--muted)}
+    input[type=text]{
+      background:#ffffff;
+      border:1px solid #ccc;
+      padding:8px 10px;
+      border-radius:6px;
+      color:#111827;
+      min-width:220px;
+    }
+    select{
+      background:#ffffff;
+      border:1px solid #ccc;
+      padding:8px;
+      border-radius:6px;
+      color:#111827;
+    }
+    button{
+      background:var(--accent);
+      border:none;
+      padding:8px 12px;
+      border-radius:6px;
+      color:#06202b;
+      cursor:pointer;
+    }
+    button.secondary{
+      background:#ffffff;
+      border:1px solid #ccc;
+      color:#333;
+    }
+    .controls-right{margin-left:auto;display:flex;gap:8px;align-items:center}
+    .canvas-wrap{
+      background:#ffffff; /* white background for animate and step-through area */
+      border:1px solid #ddd;
+      border-radius:8px;
+      padding:12px;
+    }
+    canvas{
+      background:#ffffff; /* white canvas */
+      display:block;
+      border-radius:6px;
+    }
+    .legend{display:flex;gap:12px;margin-top:8px}
+    .legend div{font-size:13px;color:#555;}
+    .small{font-size:12px;color:#666;margin-top:8px}
+    .footer{display:flex;justify-content:space-between;align-items:center;margin-top:12px}
+    .credits{font-size:12px;color:#666}
+    input[type=range]{width:140px}
+    @media(max-width:640px){.controls{flex-direction:column}.controls-right{margin-left:0}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Line Encoding Visualiser</h1>
+    <div class="controls">
+      <div class="panel">
+        <label for="bits">Bits:</label>
+        <input id="bits" type="text" value="10001011" />
+      </div>
+
+      <div class="panel">
+        <label for="scheme">Scheme:</label>
+        <select id="scheme">
+          <option>NRZ-L</option>
+          <option>NRZI</option>
+          <option>Manchester</option>
+          <option>Differential Manchester</option>
+          <option>Bipolar-AMI</option>
+        </select>
+      </div>
+
+      <div class="panel">
+        <label for="speed">Speed:</label>
+        <input id="speed" type="range" min="0.2" max="3" step="0.1" value="1" />
+      </div>
+
+      <div class="panel">
+        <label for="bitwidth">Bit width (px):</label>
+        <input id="bitwidth" type="range" min="30" max="140" step="1" value="80" />
+      </div>
+
+      <div class="panel">
+        <label for="mode">Mode:</label>
+        <select id="mode">
+          <option value="animate">Animate</option>
+          <option value="step">Step-through</option>
+        </select>
+      </div>
+
+      <div class="controls-right">
+        <button id="playBtn">Play</button>
+        <button id="pauseBtn" class="secondary">Pause</button>
+        <button id="prevBtn" class="secondary" style="display:none">Prev</button>
+        <button id="nextBtn" class="secondary" style="display:none">Next</button>
+        <button id="exportBtn" class="secondary">Export PNG</button>
+      </div>
+    </div>
+
+    <div class="canvas-wrap">
+      <canvas id="waveCanvas" width="1000" height="300"></canvas>
+      <div class="legend">
+        <div id="info" class="small">Scheme: <strong id="infoScheme">NRZ-L</strong> · Bits: <strong id="infoBits">10001011</strong></div>
+        <div class="small">Vertical lines mark bit boundaries. The signal starts at 0V baseline. Use Step-through to inspect one bit interval at a time.</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div class="credits">Created for classroom use — animations show a moving time window of the encoded waveform.</div>
+      <div class="small">Conventions: NRZ-L (1=0V, 0=+V), NRZI (transition at start of 1), Manchester (1=0V→+V, 0=+V→0V), Differential Manchester (mid-bit transition), Bipolar-AMI (1 alternates +V/−V).</div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('waveCanvas');
+  const ctx = canvas.getContext('2d');
+  const bitsInput = document.getElementById('bits');
+  const schemeSelect = document.getElementById('scheme');
+  const playBtn = document.getElementById('playBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  const speedRange = document.getElementById('speed');
+  const bitWidthRange = document.getElementById('bitwidth');
+  const modeSelect = document.getElementById('mode');
+  const infoScheme = document.getElementById('infoScheme');
+  const infoBits = document.getElementById('infoBits');
+
+  let running = false;
+  let t = 0;
+  let lastTime = 0;
+  let mode = 'animate';
+  let stepIndex = 1;
+
+  function parseBits(s){
+    return (s||'').trim().replace(/[^01]/g,'').split('').map(x=>parseInt(x));
+  }
+
+  function generateWaveform(bits, scheme){
+    const segs = [];
+    if(scheme === 'NRZ-L'){
+      bits.forEach(b => { segs.push({type:'flat', value:(b===1?0:1)}); });
+    } else if(scheme === 'NRZI'){
+      let cur = 0;
+      bits.forEach(b => {
+        if(b===1){ cur = (cur===0?1:0); }
+        segs.push({type:'flat', value:cur});
+      });
+    } else if(scheme === 'Manchester'){
+      bits.forEach(b => {
+        if(b===1){ segs.push({type:'half', first:0, second:1}); }
+        else { segs.push({type:'half', first:1, second:0}); }
+      });
+    } else if(scheme === 'Differential Manchester'){
+      let cur = 0;
+      bits.forEach(b => {
+        if(b===0){ cur = (cur===0?1:0); }
+        const first = cur;
+        const second = (cur===0?1:0);
+        segs.push({type:'half', first, second});
+        cur = second;
+      });
+    } else if(scheme === 'Bipolar-AMI'){
+      let lastPol = -1;
+      bits.forEach(b => {
+        if(b===0) segs.push({type:'flat', value:0});
+        else { lastPol = -lastPol; segs.push({type:'flat', value:lastPol}); }
+      });
+      segs.push({type:'flat', value:0});
+    }
+    return segs;
+  }
+
+  function drawGrid(bitPx, bits){
+    const w = canvas.width; const h = canvas.height;
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,w,h);
+
+    const centerY = h/2;
+    ctx.save();
+    ctx.strokeStyle = '#999';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(0, centerY); ctx.lineTo(w, centerY); ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = '#aaa';
+    ctx.setLineDash([4,6]); ctx.lineWidth = 1;
+    for(let i=0;i<=bits.length;i++){
+      const x = 20 + i*bitPx;
+      ctx.beginPath(); ctx.moveTo(x, 12); ctx.lineTo(x, h-12); ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.save(); ctx.fillStyle = '#333'; ctx.font = '12px Inter, Arial';
+    for(let i=0;i<bits.length;i++){
+      const x = 20 + i*bitPx + bitPx/2;
+      ctx.fillText(bits[i], x - 3, h - 8);
+    }
+    ctx.restore();
+
+    ctx.save(); ctx.fillStyle = '#333'; ctx.font='12px Inter, Arial';
+    ctx.fillText('+V', 8, centerY - 80);
+    ctx.fillText('0V', 8, centerY + 4);
+    ctx.fillText('-V', 8, centerY + 88);
+    ctx.restore();
+  }
+
+  function renderFrame(delta){
+    const h = canvas.height;
+    const bits = parseBits(bitsInput.value);
+    const scheme = schemeSelect.value;
+    infoScheme.textContent = scheme;
+    infoBits.textContent = bits.join('')||'(empty)';
+
+    const bitPx = parseInt(bitWidthRange.value);
+    const speed = parseFloat(speedRange.value);
+
+    drawGrid(bitPx, bits);
+    const segs = generateWaveform(bits, scheme);
+
+    const amp = Math.min(80, h*0.35);
+    const centerY = h/2;
+
+    ctx.save();
+    if(mode === 'animate'){
+      ctx.translate(-t,0);
+    }
+    ctx.lineWidth = 3; ctx.strokeStyle = '#38bdf8'; ctx.lineJoin='round'; ctx.lineCap='butt'; ctx.beginPath();
+
+    let x = 20;
+    let prevY = centerY;
+    ctx.moveTo(x, prevY);
+
+    let drawCount = segs.length;
+    if(mode === 'step'){
+      drawCount = Math.min(stepIndex, segs.length);
+    }
+
+    for(let i=0;i<drawCount;i++){
+      const seg = segs[i];
+      if(seg.type === 'flat'){
+        const y = centerY - (seg.value * amp);
+        if(Math.abs(y - prevY) > 0.5){ ctx.lineTo(x, y); }
+        ctx.lineTo(x + bitPx, y);
+        prevY = y; x += bitPx;
+      } else if(seg.type === 'half'){
+        const y1 = centerY - (seg.first * amp);
+        const y2 = centerY - (seg.second * amp);
+        if(Math.abs(y1 - prevY) > 0.5) ctx.lineTo(x, y1);
+        ctx.lineTo(x + bitPx/2, y1);
+        ctx.lineTo(x + bitPx/2, y2);
+        ctx.lineTo(x + bitPx, y2);
+        prevY = y2; x += bitPx;
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function loop(ts){
+    if(!lastTime) lastTime = ts;
+    const delta = ts - lastTime; lastTime = ts;
+    renderFrame(delta);
+    requestAnimationFrame(loop);
+  }
+
+  playBtn.addEventListener('click', ()=>{ running = true; playBtn.disabled = true; pauseBtn.disabled = false; });
+  pauseBtn.addEventListener('click', ()=>{ running = false; playBtn.disabled = false; pauseBtn.disabled = true; });
+  pauseBtn.disabled = true;
+
+  prevBtn.addEventListener('click', ()=>{ stepIndex = Math.max(1, stepIndex - 1); });
+  nextBtn.addEventListener('click', ()=>{ const bits = parseBits(bitsInput.value); stepIndex = Math.min(bits.length, stepIndex + 1); });
+
+  modeSelect.addEventListener('change', ()=>{
+    mode = modeSelect.value;
+    if(mode === 'step'){
+      running = false; playBtn.disabled = false; pauseBtn.disabled = true;
+      prevBtn.style.display = 'inline-block'; nextBtn.style.display = 'inline-block';
+      const bits = parseBits(bitsInput.value);
+      stepIndex = Math.min(Math.max(1, stepIndex), bits.length);
+    } else {
+      prevBtn.style.display = 'none'; nextBtn.style.display = 'none';
+    }
+  });
+
+  bitsInput.addEventListener('input', ()=>{ t = 0; const bits = parseBits(bitsInput.value); stepIndex = Math.min(stepIndex, Math.max(1, bits.length)); });
+
+  exportBtn.addEventListener('click', ()=>{
+    const data = canvas.toDataURL('image/png');
+    const a = document.createElement('a'); a.href = data; a.download = 'waveform.png'; a.click();
+  });
+
+  function fitCanvas(){
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.min(1400, Math.max(700, Math.floor(rect.width)));
+    canvas.height = 300;
+  }
+  window.addEventListener('resize', ()=>{ fitCanvas(); });
+  fitCanvas();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
